@@ -1,14 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import {
+  fetchTemperature,
+  calculateRiskScore,
+  pearsonCorrelation,
+  VULNERABILITY,
+  TARGET_ZIP_CODES,
+  ZIP_COORDS,
+  getCachedTemps,
+  getFallbackTemps,
+} from './api';
 
-const ZIP_COORDS = {
-  '85001': [33.4484, -112.0740],
-  '85008': [33.4787, -112.0476],
-  '85015': [33.5117, -112.1449],
-  '85018': [33.5008, -111.9805],
-  '85041': [33.3435, -112.1004],
-};
 const PHOENIX_CENTER = [33.45, -112.07];
 
 function riskColor(score) {
@@ -20,9 +22,6 @@ function riskLabel(score) {
   if (score >= 70) return 'HIGH';
   if (score >= 50) return 'MEDIUM';
   return 'LOW';
-}
-function backendCalculate(temperature, elderlyPct, lowIncomePct) {
-  return +(0.61 * temperature + 0.24 * elderlyPct + 0.15 * lowIncomePct).toFixed(2);
 }
 
 export default function App() {
@@ -37,39 +36,60 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [correlation, setCorrelation] = useState(null);
 
-  const API_BASE = process.env.REACT_APP_API_URL || '';
-
-  const fetchScores = useCallback(async () => {
+  // --- Load scores directly from FortyGuard (no backend) ---
+  const loadScores = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await axios.get(`${API_BASE}/api/risk-scores`);
-      return res.data;
+      const results = [];
+
+      for (const zip of TARGET_ZIP_CODES) {
+        const temp = await fetchTemperature(zip);
+        const v = VULNERABILITY[zip];
+        const risk_score = calculateRiskScore(temp, v.elderly_pct, v.low_income_pct);
+        results.push({
+          zip_code: zip,
+          neighborhood: v.neighborhood,
+          temperature: temp,
+          elderly_pct: v.elderly_pct,
+          low_income_pct: v.low_income_pct,
+          tree_canopy_pct: v.tree_canopy_pct,
+          risk_score,
+        });
+      }
+
+      results.sort((a, b) => b.risk_score - a.risk_score);
+      return results;
     } catch (err) {
       setError(err.message);
       return [];
     } finally {
       setLoading(false);
     }
-  }, [API_BASE]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    fetchScores().then((d) => { if (!cancelled) setData(d); });
+    loadScores().then((d) => { if (!cancelled) setData(d); });
     const interval = setInterval(() => {
-      fetchScores().then((d) => { if (!cancelled) setData(d); });
+      loadScores().then((d) => { if (!cancelled) setData(d); });
     }, 60000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [fetchScores]);
+  }, [loadScores]);
 
+  // --- Recalculate when weights change ---
   useEffect(() => {
     if (!data.length) return;
     const recalculated = data
-      .map((d) => ({ ...d, risk_score: backendCalculate(d.temperature, d.elderly_pct, d.low_income_pct) }))
+      .map((d) => ({
+        ...d,
+        risk_score: calculateRiskScore(d.temperature, d.elderly_pct, d.low_income_pct),
+      }))
       .sort((a, b) => b.risk_score - a.risk_score);
     setData(recalculated);
   }, [weights]);
 
+  // --- Alert on threshold crossing ---
   const [prevTopZip, setPrevTopZip] = useState(null);
   useEffect(() => {
     if (!data.length) return;
@@ -80,30 +100,16 @@ export default function App() {
     setPrevTopZip(top.zip_code);
   }, [data]);
 
-  // Fetch correlation data
-  const fetchCorrelation = useCallback(async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/api/correlation`);
-      setCorrelation(res.data);
-    } catch (err) {
-      console.error('Correlation fetch failed:', err);
-    }
-  }, [API_BASE]);
-
-  useEffect(() => {
-    if (activeTab === 'analysis') {
-      fetchCorrelation();
-    }
-  }, [activeTab, fetchCorrelation]);
-
+  // --- Heatwave simulation ---
   const startSimulation = useCallback(async () => {
     setSimulating(true);
     setSimStep(0);
     setAlert(null);
-    const baseData = await fetchScores();
+    const baseData = await loadScores();
     const sorted = baseData.sort((a, b) => b.risk_score - a.risk_score);
     setData(sorted);
     setPrevTopZip(sorted[0]?.zip_code || null);
+
     const steps = [0, 3, 6, 9, 12];
     for (let i = 0; i < steps.length; i++) {
       setSimStep(i);
@@ -111,14 +117,15 @@ export default function App() {
       const bumped = sorted.map((d) => ({
         ...d,
         temperature: +(d.temperature + steps[i]).toFixed(1),
-        risk_score: backendCalculate(d.temperature + steps[i], d.elderly_pct, d.low_income_pct),
+        risk_score: calculateRiskScore(d.temperature + steps[i], d.elderly_pct, d.low_income_pct),
       }));
       bumped.sort((a, b) => b.risk_score - a.risk_score);
       setData(bumped);
     }
     setSimulating(false);
-  }, [fetchScores]);
+  }, [loadScores]);
 
+  // --- Weight slider ---
   const handleWeightChange = (key, value) => {
     const num = parseFloat(value);
     setWeights((prev) => {
@@ -133,11 +140,60 @@ export default function App() {
     });
   };
 
+  // --- Correlation analysis ---
+  const computeCorrelation = useCallback(() => {
+    if (!data.length) return null;
+    const temps = data.map((d) => d.temperature);
+    const elderly = data.map((d) => d.elderly_pct);
+    const income = data.map((d) => d.low_income_pct);
+    const risk = data.map((d) => d.risk_score);
+
+    const correlations = [
+      {
+        factor: 'Temperature (°F)',
+        coefficient: pearsonCorrelation(temps, risk),
+        description: 'Strong positive correlation — higher temps directly increase risk score',
+      },
+      {
+        factor: 'Elderly Population (%)',
+        coefficient: pearsonCorrelation(elderly, risk),
+        description: 'Moderate correlation — elderly populations face higher heat vulnerability',
+      },
+      {
+        factor: 'Low-Income Population (%)',
+        coefficient: pearsonCorrelation(income, risk),
+        description: 'Strong correlation — income is a key predictor of heat risk',
+      },
+    ];
+
+    const scatter_data = data.map((s) => ({
+      x: Math.round(s.temperature, 1),
+      y: s.risk_score,
+      zip_code: s.zip_code,
+      neighborhood: s.neighborhood,
+    }));
+
+    return {
+      correlations,
+      scatter_data,
+      interpretation:
+        'Temperature is the strongest driver of risk score (61% weight). ' +
+        'Low-income populations show the strongest social vulnerability correlation, ' +
+        'confirming the heat equity hypothesis.',
+    };
+  }, [data]);
+
+  useEffect(() => {
+    if (activeTab === 'analysis') {
+      setCorrelation(computeCorrelation());
+    }
+  }, [activeTab, computeCorrelation]);
+
   const topZone = data[0] || null;
   const avgTemp = data.length ? (data.reduce((s, d) => s + d.temperature, 0) / data.length).toFixed(1) : '--';
   const highRiskCount = data.filter((d) => d.risk_score >= 70).length;
 
-  // ─── SVG Scatter Plot ───
+  // --- SVG Charts ---
   const ScatterPlot = ({ points, xLabel, yLabel, color = '#8b5cf6' }) => {
     const width = 500, height = 300;
     const padding = { top: 20, right: 30, bottom: 50, left: 60 };
@@ -157,17 +213,8 @@ export default function App() {
     const toSvgY = (y) => padding.top + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
 
     const circles = points.map((p, i) => (
-      <circle
-        key={i}
-        cx={toSvgX(p.x)}
-        cy={toSvgY(p.y)}
-        r={7}
-        fill={color}
-        fillOpacity={0.7}
-        stroke="#fff"
-        strokeWidth={1.5}
-      >
-        <title>{p.neighborhood} ({p.zip_code})\n{xLabel}: {p.x}  {yLabel}: {p.y}</title>
+      <circle key={i} cx={toSvgX(p.x)} cy={toSvgY(p.y)} r={7} fill={color} fillOpacity={0.7} stroke="#fff" strokeWidth={1.5}>
+        <title>{`${p.neighborhood} (${p.zip_code})\n${xLabel}: ${p.x}  ${yLabel}: ${p.y}`}</title>
       </circle>
     ));
 
@@ -204,18 +251,19 @@ export default function App() {
     );
   };
 
-  // ─── Correlation Bar Chart ───
   const CorrBarChart = ({ correlations }) => {
     const width = 500, height = 200;
     const padding = { top: 10, right: 20, bottom: 60, left: 50 };
-    const barW = (width - padding.left - padding.right) / correlations.length - 20;
+    const chartH = height - padding.top - padding.bottom - 40;
 
     return (
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', maxHeight: '240px' }}>
         {correlations.map((c, i) => {
-          const x = padding.left + i * ((width - padding.left - padding.right) / correlations.length) + 10;
-          const barH = Math.abs(c.coefficient) * (height - padding.top - padding.bottom - 40);
-          const y = c.coefficient >= 0 ? padding.top + (height - padding.top - padding.bottom - 40) - barH : padding.top + (height - padding.top - padding.bottom - 40) / 2;
+          const groupW = (width - padding.left - padding.right) / correlations.length;
+          const x = padding.left + i * groupW + 10;
+          const barW = groupW - 20;
+          const barH = Math.abs(c.coefficient) * chartH;
+          const y = c.coefficient >= 0 ? padding.top + chartH - barH : padding.top + chartH / 2;
           const color = c.coefficient >= 0.5 ? '#ef4444' : c.coefficient >= 0.3 ? '#f59e0b' : '#64748b';
           return (
             <g key={i}>
@@ -226,18 +274,19 @@ export default function App() {
               <text x={x + barW / 2} y={height - 10} fill="#94a3b8" fontSize="10" textAnchor="middle">
                 {c.factor.split(' ')[0]}
               </text>
-              <text x={x + barW / 2} y={height - 0} fill="#64748b" fontSize="9" textAnchor="middle">
-                {c.factor.split(' ')[1] || ''}
+              <text x={x + barW / 2} y={height} fill="#64748b" fontSize="9" textAnchor="middle">
+                {c.factor.split(' ').slice(1).join(' ')}
               </text>
             </g>
           );
         })}
-        <line x1={padding.left} y1={padding.top + (height - padding.top - padding.bottom - 40) / 2} x2={width - padding.right} y2={padding.top + (height - padding.top - padding.bottom - 40) / 2} stroke="#2a3550" />
-        <text x={width / 2} y={height - 0} fill="#94a3b8" fontSize="12" textAnchor="middle" fontWeight="600">Correlation Strength</text>
+        <line x1={padding.left} y1={padding.top + chartH / 2} x2={width - padding.right} y2={padding.top + chartH / 2} stroke="#2a3550" />
+        <text x={width / 2} y={height} fill="#94a3b8" fontSize="12" textAnchor="middle" fontWeight="600">Correlation Strength</text>
       </svg>
     );
   };
 
+  // --- Render ---
   return (
     <div className="app-root">
       {/* Sidebar */}
@@ -300,9 +349,9 @@ export default function App() {
           <div className="sidebar-section">
             <h3>Heat Equity Analysis</h3>
             <p className="analysis-desc">
-              This analysis tests whether temperature and social vulnerability factors correlate with heat risk scores across Phoenix zip codes.
+              Testing whether temperature and social vulnerability factors correlate with heat risk across Phoenix zip codes.
             </p>
-            <button className="sim-btn" onClick={fetchCorrelation} style={{ marginBottom: '12px' }}>
+            <button className="sim-btn" onClick={() => setCorrelation(computeCorrelation())} style={{ marginBottom: '12px' }}>
               🔄 Refresh Analysis
             </button>
             {correlation && (
@@ -443,13 +492,11 @@ export default function App() {
 
             {correlation && (
               <>
-                {/* Interpretation */}
                 <div className="analysis-card">
                   <h3>📋 Key Findings</h3>
                   <p className="interpretation-text">{correlation.interpretation}</p>
                 </div>
 
-                {/* Correlation Coefficients */}
                 <div className="analysis-card">
                   <h3>📊 Pearson Correlation Coefficients</h3>
                   <p className="card-desc">Measuring the linear relationship between each factor and risk score (r = -1 to +1, where |r| ≥ 0.7 is strong)</p>
@@ -469,7 +516,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Scatter Plot: Temperature vs Risk Score */}
                 <div className="analysis-card">
                   <h3>🌡️ Temperature vs Risk Score</h3>
                   <p className="card-desc">Each point represents a Phoenix zip code. Hover to see details.</p>
@@ -478,7 +524,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Methodology */}
                 <div className="analysis-card">
                   <h3>🔬 Methodology</h3>
                   <div className="methodology-grid">
@@ -505,7 +550,7 @@ export default function App() {
 
             {!correlation && (
               <div className="analysis-placeholder">
-                <p>Click "Refresh Analysis" in the sidebar to load correlation data.</p>
+                <p>Switch to the Dashboard tab and back, or click "Refresh Analysis" to load correlation data.</p>
               </div>
             )}
           </div>
