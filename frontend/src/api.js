@@ -84,47 +84,88 @@ function cToF(c) {
 }
 
 async function submitHeatmap() {
-  const payload = {
-    polygon_aoi: {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'Polygon',
-          coordinates: [PHOENIX_POLYGON],
-        },
-      }],
-    },
-    date_time: {
-      start_date: new Date().toISOString().slice(0, 10),
-      start_time: '14:00',
-      filter_type: 1,
-    },
-    granularity: 60,
-  };
-
-  const resp = await fetchWithTimeout(
-    `${PROXY_BASE}/heatmap`,
+  // Try multiple payloads in order of preference
+  const payloads = [
     {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify(payload),
+      name: 'phoenix_polygon',
+      body: {
+        polygon_aoi: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Polygon',
+              coordinates: [PHOENIX_POLYGON],
+            },
+          }],
+        },
+        date_time: {
+          start_date: new Date().toISOString().slice(0, 10),
+          start_time: '14:00',
+          filter_type: 1,
+        },
+        granularity: 60,
+      },
+    },
+    {
+      name: 'no_polygon',
+      body: {
+        date_time: {
+          start_date: new Date().toISOString().slice(0, 10),
+          start_time: '14:00',
+          filter_type: 1,
+        },
+        granularity: 60,
+      },
+    },
+    {
+      name: 'single_point',
+      body: {
+        point_aoi: {
+          type: 'Point',
+          coordinates: [-112.0740, 33.4484],
+        },
+        date_time: {
+          start_date: new Date().toISOString().slice(0, 10),
+          start_time: '14:00',
+          filter_type: 1,
+        },
+        granularity: 60,
+      },
+    },
+  ];
+
+  for (const payload of payloads) {
+    console.log(`Trying heatmap with ${payload.name}...`);
+    try {
+      const resp = await fetchWithTimeout(
+        `${PROXY_BASE}/heatmap`,
+        {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify(payload.body),
+        }
+      );
+
+      if (!resp.ok) {
+        console.log(`${payload.name} failed: HTTP ${resp.status}`);
+        continue;
+      }
+
+      const data = await resp.json();
+      const activityId = data?.data?.activity_id;
+      if (activityId) {
+        console.log(`Heatmap submitted with ${payload.name}, activity_id:`, activityId);
+        return activityId;
+      }
+      console.log(`${payload.name} returned no activity_id:`, JSON.stringify(data).slice(0, 200));
+    } catch (err) {
+      console.log(`${payload.name} error:`, err.message);
     }
-  );
-
-  if (!resp.ok) {
-    const errBody = await resp.json().catch(() => ({}));
-    throw new Error(`Heatmap submit failed: HTTP ${resp.status} — ${JSON.stringify(errBody)}`);
   }
 
-  const data = await resp.json();
-  const activityId = data?.data?.activity_id;
-  if (activityId) {
-    console.log('Heatmap submitted, activity_id:', activityId);
-    return activityId;
-  }
-  throw new Error('No activity_id in response: ' + JSON.stringify(data));
+  throw new Error('All heatmap payloads failed');
 }
 
 async function pollHeatmap(activityId) {
