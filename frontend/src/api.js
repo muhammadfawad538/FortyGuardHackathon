@@ -163,9 +163,15 @@ function extractTemperatures(result) {
   TARGET_ZIPS.forEach((z) => { temps[z] = null; });
 
   // Try multiple possible locations for features
-  const features = result?.map_data?.features || result?.features || result?.data?.features || [];
+  let features = [];
+  if (Array.isArray(result)) {
+    features = result;
+  } else {
+    features = result?.map_data?.features || result?.features || result?.data?.features || [];
+  }
 
-  console.log('Heatmap result keys:', Object.keys(result || {}));
+  console.log('Heatmap result type:', Array.isArray(result) ? 'array(' + result.length + ')' : typeof result);
+  console.log('Heatmap result keys:', Array.isArray(result) ? '(array)' : Object.keys(result || {}));
   console.log('Features count:', features.length);
   if (features.length > 0) {
     console.log('First feature keys:', Object.keys(features[0]));
