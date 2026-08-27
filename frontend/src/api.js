@@ -162,24 +162,50 @@ function extractTemperatures(result) {
   const temps = {};
   TARGET_ZIPS.forEach((z) => { temps[z] = null; });
 
-  const features = result?.map_data?.features || result?.features || [];
+  // Try multiple possible locations for features
+  const features = result?.map_data?.features || result?.features || result?.data?.features || [];
+
+  console.log('Heatmap result keys:', Object.keys(result || {}));
+  console.log('Features count:', features.length);
+  if (features.length > 0) {
+    console.log('First feature keys:', Object.keys(features[0]));
+    console.log('First feature props:', JSON.stringify(features[0].properties).slice(0, 200));
+    console.log('First feature geom type:', features[0].geometry?.type);
+  }
 
   for (const feature of features) {
     const avgC = feature?.properties?.average_temperature;
     if (avgC == null) continue;
 
     const geom = feature?.geometry;
-    if (geom?.type !== 'Polygon') continue;
-    const polygon = geom.coordinates[0];
-
-    for (const [zip, center] of Object.entries(ZIP_CENTERS)) {
-      if (temps[zip] != null) continue;
-      if (pointInPolygon(center, polygon)) {
-        temps[zip] = cToF(parseFloat(avgC));
+    if (!geom) continue;
+    if (geom.type === 'Polygon') {
+      const polygon = geom.coordinates[0];
+      for (const [zip, center] of Object.entries(ZIP_CENTERS)) {
+        if (temps[zip] != null) continue;
+        if (pointInPolygon(center, polygon)) {
+          temps[zip] = cToF(parseFloat(avgC));
+        }
+      }
+    } else if (geom.type === 'Point') {
+      // If it's a point, assign to nearest zip
+      const [lng, lat] = geom.coordinates;
+      let nearestZip = null;
+      let nearestDist = Infinity;
+      for (const [zip, center] of Object.entries(ZIP_CENTERS)) {
+        const dist = Math.sqrt((center[0] - lng) ** 2 + (center[1] - lat) ** 2);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestZip = zip;
+        }
+      }
+      if (nearestZip && temps[nearestZip] == null) {
+        temps[nearestZip] = cToF(parseFloat(avgC));
       }
     }
   }
 
+  console.log('Extracted temperatures:', temps);
   return temps;
 }
 
@@ -194,6 +220,23 @@ async function fetchHeatmapTemps() {
 
   const temps = extractTemperatures(result);
   console.log('Extracted temperatures:', temps);
+
+  // If no zip codes matched any polygon, use the average for all
+  const hasAny = Object.values(temps).some((v) => v != null);
+  if (!hasAny && features.length > 0) {
+    const allTemps = [];
+    for (const feature of features) {
+      const avgC = feature?.properties?.average_temperature;
+      if (avgC != null) allTemps.push(cToF(parseFloat(avgC)));
+    }
+    if (allTemps.length > 0) {
+      const avg = Math.round(allTemps.reduce((a, b) => a + b, 0) / allTemps.length);
+      TARGET_ZIPS.forEach((z) => { temps[z] = avg; });
+      console.log('Using average temperature for all zips:', avg);
+    }
+  }
+
+  console.log('Final temperatures:', temps);
   return temps;
 }
 
