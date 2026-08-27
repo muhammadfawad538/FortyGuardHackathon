@@ -3,12 +3,13 @@
  * No backend needed.
  */
 
-const FORTYGUARD_BASE_URL = 'https://api.fortyguard.com/v1';
+// Use Vercel serverless proxy to avoid CORS issues
+const PROXY_BASE = '/api/proxy';
 const FORTYGUARD_API_KEY = '4536cc0c45783b70c235fb81050e8718';
 
 const CACHE_TTL_MS = 60 * 1000;
 
-// Fallback temperatures (Fahrenheit)
+// Fallback temperatures (Fahrenheit) — shown when API is unreachable
 const FALLBACK_TEMPS = {
   '85001': 105.0,
   '85008': 108.0,
@@ -19,7 +20,6 @@ const FALLBACK_TEMPS = {
 
 const TARGET_ZIPS = Object.keys(FALLBACK_TEMPS);
 
-// Zip code centers (lng, lat) for tile lookup
 const ZIP_CENTERS = {
   '85001': [-112.0740, 33.4484],
   '85008': [-112.0476, 33.4787],
@@ -28,7 +28,6 @@ const ZIP_CENTERS = {
   '85041': [-112.1004, 33.3435],
 };
 
-// Phoenix bounding box
 const PHOENIX_POLYGON = [
   [-112.18, 33.30],
   [-111.90, 33.30],
@@ -37,16 +36,33 @@ const PHOENIX_POLYGON = [
   [-112.18, 33.30],
 ];
 
-// In-memory cache
 let tempCache = {};
 let lastHeatmapTime = 0;
 const HEATMAP_COOLDOWN = 55 * 1000;
+const FETCH_TIMEOUT = 15_000; // 15s timeout for each fetch
 
 function headers() {
   return {
     'Content-Type': 'application/json',
     'api-key': FORTYGUARD_API_KEY,
   };
+}
+
+// Fetch with timeout using AbortController
+async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { ...options, signal: controller.signal });
+    return resp;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function pointInPolygon(point, polygon) {
@@ -90,47 +106,57 @@ async function submitHeatmap() {
     granularity: 100,
   };
 
-  const resp = await fetch(`${FORTYGUARD_BASE_URL}/heatmap`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify(payload),
-  });
+  const resp = await fetchWithTimeout(
+    `${PROXY_BASE}/heatmap`,
+    {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(payload),
+    }
+  );
 
   if (!resp.ok) {
-    throw new Error(`Heatmap submit failed: ${resp.status}`);
+    throw new Error(`Heatmap submit failed: HTTP ${resp.status}`);
   }
 
   const data = await resp.json();
-  return data?.data?.activity_id;
+  const activityId = data?.data?.activity_id;
+  if (activityId) {
+    console.log('Heatmap submitted, activity_id:', activityId);
+    return activityId;
+  }
+  throw new Error('No activity_id in response: ' + JSON.stringify(data));
 }
 
 async function pollHeatmap(activityId) {
-  const url = `${FORTYGUARD_BASE_URL}/status/${activityId}`;
+  const url = `${PROXY_BASE}/status/${activityId}`;
 
   for (let attempt = 0; attempt < 20; attempt++) {
     try {
-      const resp = await fetch(url, { headers: headers() });
+      const resp = await fetchWithTimeout(url, { headers: headers() }, 10_000);
       if (!resp.ok) {
-        throw new Error(`Status poll failed: ${resp.status}`);
+        throw new Error(`Status poll failed: HTTP ${resp.status}`);
       }
       const data = await resp.json();
       const status = data?.data?.status?.toLowerCase();
 
       if (status === 'completed' || status === 'succeeded') {
+        console.log('Heatmap completed after', attempt + 1, 'polls');
         return data.data.result || data.data;
       }
       if (status === 'failed' || status === 'error') {
         console.error('Heatmap task failed:', data);
         return null;
       }
+      console.log(`Heatmap processing... (poll ${attempt + 1})`);
     } catch (err) {
-      console.warn(`Poll error (attempt ${attempt + 1}):`, err);
+      console.warn(`Poll error (attempt ${attempt + 1}):`, err.message);
     }
 
     await new Promise((r) => setTimeout(r, 3000));
   }
 
-  console.error('Heatmap task timed out');
+  console.error('Heatmap task timed out after 20 polls');
   return null;
 }
 
@@ -160,13 +186,17 @@ function extractTemperatures(result) {
 }
 
 async function fetchHeatmapTemps() {
+  console.log('Submitting heatmap task to FortyGuard...');
   const activityId = await submitHeatmap();
   if (!activityId) return null;
 
+  console.log('Polling for results...');
   const result = await pollHeatmap(activityId);
   if (!result) return null;
 
-  return extractTemperatures(result);
+  const temps = extractTemperatures(result);
+  console.log('Extracted temperatures:', temps);
+  return temps;
 }
 
 export async function fetchTemperature(zipCode) {
@@ -186,20 +216,25 @@ export async function fetchTemperature(zipCode) {
       const temps = await fetchHeatmapTemps();
       if (temps) {
         const t = Date.now();
+        let hasAny = false;
         for (const [z, temp] of Object.entries(temps)) {
           if (temp != null) {
             tempCache[z] = { temp, ts: t };
+            hasAny = true;
           }
         }
-        lastHeatmapTime = t;
-        if (temps[zipCode] != null) return temps[zipCode];
+        if (hasAny) {
+          lastHeatmapTime = t;
+          if (temps[zipCode] != null) return temps[zipCode];
+        }
       }
     } catch (err) {
-      console.warn(`Temperature fetch failed for ${zipCode}:`, err);
+      console.error(`Temperature fetch failed for ${zipCode}:`, err);
     }
   }
 
-  // Fallback: stale cache or default
+  // Fallback: stale cache or default fallback
+  console.log(`Using fallback temperature for ${zipCode}:`, cached ? cached.temp : FALLBACK_TEMPS[zipCode]);
   if (cached) return cached.temp;
   return FALLBACK_TEMPS[zipCode] || 100;
 }
@@ -221,7 +256,6 @@ export const ZIP_COORDS = {
   '85041': [33.3435, -112.1004],
 };
 
-// Vulnerability data (embedded so no backend needed)
 export const VULNERABILITY = {
   '85001': { neighborhood: 'Downtown Phoenix', elderly_pct: 8.2, low_income_pct: 34.5, tree_canopy_pct: 6.1 },
   '85008': { neighborhood: 'East Phoenix (Villa de Paz)', elderly_pct: 12.7, low_income_pct: 41.2, tree_canopy_pct: 9.3 },
