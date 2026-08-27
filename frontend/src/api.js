@@ -84,7 +84,9 @@ function cToF(c) {
 }
 
 async function submitHeatmap() {
-  // Try multiple payloads in order of preference
+  // Use 2024-07-15 like the FortyGuard docs example — they likely only have historical data
+  const dateStr = '2024-07-15';
+
   const payloads = [
     {
       name: 'phoenix_polygon',
@@ -100,38 +102,32 @@ async function submitHeatmap() {
             },
           }],
         },
-        date_time: {
-          start_date: new Date().toISOString().slice(0, 10),
-          start_time: '14:00',
-          filter_type: 1,
-        },
-        granularity: 60,
+        date_time: { start_date: dateStr, start_time: '14:00', filter_type: 1 },
+        granularity: 100,
       },
     },
     {
-      name: 'no_polygon',
+      name: 'nyc_polygon',
       body: {
-        date_time: {
-          start_date: new Date().toISOString().slice(0, 10),
-          start_time: '14:00',
-          filter_type: 1,
+        polygon_aoi: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [-74.0170, 40.7050],
+                [-74.0030, 40.7050],
+                [-74.0030, 40.7180],
+                [-74.0170, 40.7180],
+                [-74.0170, 40.7050],
+              ]],
+            },
+          }],
         },
-        granularity: 60,
-      },
-    },
-    {
-      name: 'single_point',
-      body: {
-        point_aoi: {
-          type: 'Point',
-          coordinates: [-112.0740, 33.4484],
-        },
-        date_time: {
-          start_date: new Date().toISOString().slice(0, 10),
-          start_time: '14:00',
-          filter_type: 1,
-        },
-        granularity: 60,
+        date_time: { start_date: dateStr, start_time: '14:00', filter_type: 1 },
+        granularity: 100,
       },
     },
   ];
@@ -149,7 +145,8 @@ async function submitHeatmap() {
       );
 
       if (!resp.ok) {
-        console.log(`${payload.name} failed: HTTP ${resp.status}`);
+        const errBody = await resp.json().catch(() => ({}));
+        console.log(`${payload.name} failed: HTTP ${resp.status} — ${JSON.stringify(errBody)}`);
         continue;
       }
 
