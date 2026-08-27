@@ -14,12 +14,12 @@ import {
 const PHOENIX_CENTER = [33.45, -112.07];
 
 function riskColor(score) {
-  if (score >= 76) return '#ef4444';
+  if (score >= 75) return '#ef4444';
   if (score >= 70) return '#f59e0b';
   return '#22c55e';
 }
 function riskLabel(score) {
-  if (score >= 76) return 'HIGH';
+  if (score >= 75) return 'HIGH';
   if (score >= 70) return 'MEDIUM';
   return 'LOW';
 }
@@ -94,7 +94,7 @@ export default function App() {
   useEffect(() => {
     if (!data.length) return;
     const top = data[0];
-    if (prevTopZip && (top.zip_code !== prevTopZip || top.risk_score >= 76)) {
+    if (prevTopZip && (top.zip_code !== prevTopZip || top.risk_score >= 75)) {
       setAlert({ zip: top.zip_code, neighborhood: top.neighborhood, score: top.risk_score });
     }
     setPrevTopZip(top.zip_code);
@@ -191,7 +191,7 @@ export default function App() {
 
   const topZone = data[0] || null;
   const avgTemp = data.length ? (data.reduce((s, d) => s + d.temperature, 0) / data.length).toFixed(1) : '--';
-  const highRiskCount = data.filter((d) => d.risk_score >= 76).length;
+  const highRiskCount = data.filter((d) => d.risk_score >= 75).length;
 
   // --- SVG Charts ---
   const ScatterPlot = ({ points, xLabel, yLabel, color = '#8b5cf6' }) => {
