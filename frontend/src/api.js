@@ -170,7 +170,7 @@ async function pollHeatmap(activityId) {
 
   for (let attempt = 0; attempt < 20; attempt++) {
     try {
-      const resp = await fetchWithTimeout(url, { headers: headers() }, 10_000);
+      const resp = await fetchWithTimeout(url, { headers: headers() }, 30_000);
       if (!resp.ok) {
         throw new Error(`Status poll failed: HTTP ${resp.status}`);
       }
