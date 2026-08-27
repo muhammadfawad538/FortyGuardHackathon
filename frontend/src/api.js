@@ -3,9 +3,8 @@
  * No backend needed.
  */
 
-// Use Vercel serverless proxy to avoid CORS issues
+// All requests go through the Vercel serverless proxy (no CORS, no exposed key)
 const PROXY_BASE = '/api/proxy';
-const FORTYGUARD_API_KEY = '4536cc0c45783b70c235fb81050e8718';
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -44,7 +43,6 @@ const FETCH_TIMEOUT = 15_000; // 15s timeout for each fetch
 function headers() {
   return {
     'Content-Type': 'application/json',
-    'api-key': FORTYGUARD_API_KEY,
   };
 }
 
@@ -209,7 +207,7 @@ export async function fetchTemperature(zipCode) {
   }
 
   // Decide whether to submit a new heatmap task
-  const needNewHeatmap = !FORTYGUARD_API_KEY || now - lastHeatmapTime > HEATMAP_COOLDOWN;
+  const needNewHeatmap = now - lastHeatmapTime > HEATMAP_COOLDOWN;
 
   if (needNewHeatmap) {
     try {

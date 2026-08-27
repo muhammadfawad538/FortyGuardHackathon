@@ -1,15 +1,41 @@
 /**
  * Vercel serverless function — proxy for FortyGuard API.
- * Use: /api/proxy/heatmap, /api/proxy/status/xxx, etc.
- * Eliminates CORS by making the request server-side.
+ * The FortyGuard API key lives here on Vercel's servers, never exposed to browsers.
+ * Requests are restricted to the app's own Vercel domain to prevent quota abuse.
  */
 
-const FORTYGUARD_API_KEY = '4536cc0c45783b70c235fb81050e8718';
+const FORTYGUARD_API_KEY = process.env.FORTYGUARD_API_KEY;
 const FORTYGUARD_BASE = 'https://api.fortyguard.com/v1';
 
+// Only allow requests from your own app domain
+const ALLOWED_ORIGINS = [
+  'https://forty-guard-hackathon.vercel.app',
+  'https://forty-guard-hackathon-*.vercel.app',
+];
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // allow same-origin and non-browser requests
+  for (const allowed of ALLOWED_ORIGINS) {
+    if (allowed.includes('*')) {
+      const pattern = allowed.replace(/\*/g, '.*');
+      if (new RegExp(`^${pattern}$`).test(origin)) return true;
+    } else if (origin === allowed) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS — only allow your own domain
+  const origin = req.headers.origin;
+  if (origin && !isAllowedOrigin(origin)) {
+    return res.status(403).json({ error: true, message: 'Forbidden' });
+  }
+
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, api-key');
 
@@ -17,10 +43,13 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Build the target URL from the path segments
+  if (!FORTYGUARD_API_KEY) {
+    return res.status(500).json({ error: true, message: 'Server misconfigured: missing FORTYGUARD_API_KEY' });
+  }
+
   const pathSegments = req.query.path || [];
   const path = Array.isArray(pathSegments) ? pathSegments.join('/') : pathSegments;
-  const url = `${FORTYGUARD_BASE}/${path}${req.query.s ? '?' + new URLSearchParams(req.query).toString() : ''}`;
+  const url = `${FORTYGUARD_BASE}/${path}`;
 
   try {
     const headers = {
@@ -38,9 +67,8 @@ export default async function handler(req, res) {
     }
 
     const response = await fetch(url, fetchOptions);
-
-    // Forward the response
     const data = await response.json();
+
     return res.status(response.status).json(data);
   } catch (err) {
     console.error('Proxy error:', err);
