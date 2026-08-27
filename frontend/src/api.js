@@ -101,7 +101,7 @@ async function submitHeatmap() {
       start_time: '14:00',
       filter_type: 1,
     },
-    granularity: 50,
+    granularity: 60,
   };
 
   const resp = await fetchWithTimeout(
