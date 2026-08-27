@@ -4,7 +4,7 @@
  */
 
 // All requests go through the Vercel serverless proxy (no CORS, no exposed key)
-const PROXY_BASE = '/api/proxy';
+const PROXY_BASE = '/api';
 
 const CACHE_TTL_MS = 60 * 1000;
 
