@@ -174,6 +174,20 @@ function extractTemperatures(result) {
   console.log('Heatmap result type:', Array.isArray(result) ? 'array(' + result.length + ')' : typeof result);
   console.log('Heatmap result keys:', Array.isArray(result) ? '(array)' : Object.keys(result || {}));
   console.log('Features count:', features.length);
+
+  // Log the full map_data structure to understand the API response
+  if (result?.map_data) {
+    console.log('map_data type:', typeof result.map_data);
+    console.log('map_data keys:', Object.keys(result.map_data || {}));
+    if (result.map_data.features) {
+      console.log('map_data.features count:', result.map_data.features.length);
+    }
+    console.log('map_data sample:', JSON.stringify(result.map_data).slice(0, 500));
+  }
+  if (result?.stats_data) {
+    console.log('stats_data:', JSON.stringify(result.stats_data).slice(0, 300));
+  }
+
   if (features.length > 0) {
     console.log('First feature keys:', Object.keys(features[0]));
     console.log('First feature props:', JSON.stringify(features[0].properties).slice(0, 200));
