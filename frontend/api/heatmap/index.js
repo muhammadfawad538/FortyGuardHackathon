@@ -39,6 +39,7 @@ export default async function handler(req, res) {
 
   const maskedKey = FORTYGUARD_API_KEY.slice(0, 4) + '...' + FORTYGUARD_API_KEY.slice(-4);
   console.log(`[proxy/heatmap] Forwarding to FortyGuard with key: ${maskedKey}`);
+  console.log(`[proxy/heatmap] Request body: ${JSON.stringify(req.body).slice(0, 500)}`);
 
   try {
     const response = await fetch(`${FORTYGUARD_BASE}/heatmap`, {
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
       body: JSON.stringify(req.body),
     });
     const data = await response.json();
-    console.log(`[proxy/heatmap] FortyGuard responded: ${response.status}`, JSON.stringify(data).slice(0, 200));
+    console.log(`[proxy/heatmap] Status: ${response.status}`, JSON.stringify(data));
     return res.status(response.status).json(data);
   } catch (err) {
     console.error('[proxy/heatmap] Error:', err);
