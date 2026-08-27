@@ -221,7 +221,6 @@ async function fetchHeatmapTemps() {
   const temps = extractTemperatures(result);
   return temps;
 }
-}
 
 export async function fetchTemperature(zipCode) {
   const now = Date.now();
