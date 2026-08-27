@@ -219,25 +219,8 @@ async function fetchHeatmapTemps() {
   if (!result) return null;
 
   const temps = extractTemperatures(result);
-  console.log('Extracted temperatures:', temps);
-
-  // If no zip codes matched any polygon, use the average for all
-  const hasAny = Object.values(temps).some((v) => v != null);
-  if (!hasAny && features.length > 0) {
-    const allTemps = [];
-    for (const feature of features) {
-      const avgC = feature?.properties?.average_temperature;
-      if (avgC != null) allTemps.push(cToF(parseFloat(avgC)));
-    }
-    if (allTemps.length > 0) {
-      const avg = Math.round(allTemps.reduce((a, b) => a + b, 0) / allTemps.length);
-      TARGET_ZIPS.forEach((z) => { temps[z] = avg; });
-      console.log('Using average temperature for all zips:', avg);
-    }
-  }
-
-  console.log('Final temperatures:', temps);
   return temps;
+}
 }
 
 export async function fetchTemperature(zipCode) {
