@@ -114,7 +114,8 @@ async function submitHeatmap() {
   );
 
   if (!resp.ok) {
-    throw new Error(`Heatmap submit failed: HTTP ${resp.status}`);
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error(`Heatmap submit failed: HTTP ${resp.status} — ${JSON.stringify(errBody)}`);
   }
 
   const data = await resp.json();

@@ -49,6 +49,7 @@ export default async function handler(req, res) {
     });
     const data = await response.json();
     console.log(`[proxy/heatmap] Status: ${response.status}`, JSON.stringify(data));
+    // Always forward the full error body so the browser can see it
     return res.status(response.status).json(data);
   } catch (err) {
     console.error('[proxy/heatmap] Error:', err);
