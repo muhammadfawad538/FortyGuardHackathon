@@ -40,15 +40,19 @@ export default async function handler(req, res) {
   const activityId = req.query.id;
   if (!activityId) return res.status(400).json({ error: true, message: 'Missing activity id' });
 
+  const maskedKey = FORTYGUARD_API_KEY.slice(0, 4) + '...' + FORTYGUARD_API_KEY.slice(-4);
+  console.log(`[proxy/status] Polling ${activityId} with key: ${maskedKey}`);
+
   try {
     const response = await fetch(`${FORTYGUARD_BASE}/status/${activityId}`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json', 'api-key': FORTYGUARD_API_KEY },
     });
     const data = await response.json();
+    console.log(`[proxy/status] FortyGuard responded: ${response.status}`, JSON.stringify(data).slice(0, 200));
     return res.status(response.status).json(data);
   } catch (err) {
-    console.error('Proxy error:', err);
+    console.error('[proxy/status] Error:', err);
     return res.status(500).json({ error: true, message: err.message });
   }
 }

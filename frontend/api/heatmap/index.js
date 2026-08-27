@@ -37,6 +37,9 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: true, message: 'Method not allowed' });
   if (!FORTYGUARD_API_KEY) return res.status(500).json({ error: true, message: 'Server misconfigured' });
 
+  const maskedKey = FORTYGUARD_API_KEY.slice(0, 4) + '...' + FORTYGUARD_API_KEY.slice(-4);
+  console.log(`[proxy/heatmap] Forwarding to FortyGuard with key: ${maskedKey}`);
+
   try {
     const response = await fetch(`${FORTYGUARD_BASE}/heatmap`, {
       method: 'POST',
@@ -44,9 +47,10 @@ export default async function handler(req, res) {
       body: JSON.stringify(req.body),
     });
     const data = await response.json();
+    console.log(`[proxy/heatmap] FortyGuard responded: ${response.status}`, JSON.stringify(data).slice(0, 200));
     return res.status(response.status).json(data);
   } catch (err) {
-    console.error('Proxy error:', err);
+    console.error('[proxy/heatmap] Error:', err);
     return res.status(500).json({ error: true, message: err.message });
   }
 }
