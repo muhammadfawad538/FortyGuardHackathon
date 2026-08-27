@@ -14,13 +14,13 @@ import {
 const PHOENIX_CENTER = [33.45, -112.07];
 
 function riskColor(score) {
-  if (score >= 70) return '#ef4444';
-  if (score >= 50) return '#f59e0b';
+  if (score >= 76) return '#ef4444';
+  if (score >= 70) return '#f59e0b';
   return '#22c55e';
 }
 function riskLabel(score) {
-  if (score >= 70) return 'HIGH';
-  if (score >= 50) return 'MEDIUM';
+  if (score >= 76) return 'HIGH';
+  if (score >= 70) return 'MEDIUM';
   return 'LOW';
 }
 
@@ -94,7 +94,7 @@ export default function App() {
   useEffect(() => {
     if (!data.length) return;
     const top = data[0];
-    if (prevTopZip && (top.zip_code !== prevTopZip || top.risk_score >= 70)) {
+    if (prevTopZip && (top.zip_code !== prevTopZip || top.risk_score >= 76)) {
       setAlert({ zip: top.zip_code, neighborhood: top.neighborhood, score: top.risk_score });
     }
     setPrevTopZip(top.zip_code);
@@ -191,7 +191,7 @@ export default function App() {
 
   const topZone = data[0] || null;
   const avgTemp = data.length ? (data.reduce((s, d) => s + d.temperature, 0) / data.length).toFixed(1) : '--';
-  const highRiskCount = data.filter((d) => d.risk_score >= 70).length;
+  const highRiskCount = data.filter((d) => d.risk_score >= 76).length;
 
   // --- SVG Charts ---
   const ScatterPlot = ({ points, xLabel, yLabel, color = '#8b5cf6' }) => {
@@ -466,7 +466,7 @@ export default function App() {
                           <td>{d.zip_code}</td>
                           <td>{d.temperature}°F</td>
                           <td>
-                            <span className="risk-badge" style={{ background: riskColor(d.risk_score), color: d.risk_score >= 50 ? '#fff' : '#000' }}>
+                            <span className="risk-badge" style={{ background: riskColor(d.risk_score), color: d.risk_score >= 70 ? '#fff' : '#000' }}>
                               {riskLabel(d.risk_score)}
                             </span>
                           </td>
