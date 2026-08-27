@@ -28,11 +28,11 @@ const ZIP_CENTERS = {
 };
 
 const PHOENIX_POLYGON = [
-  [-112.18, 33.30],
-  [-111.90, 33.30],
-  [-111.90, 33.55],
-  [-112.18, 33.55],
-  [-112.18, 33.30],
+  [-112.16, 33.33],
+  [-111.97, 33.33],
+  [-111.97, 33.52],
+  [-112.16, 33.52],
+  [-112.16, 33.33],
 ];
 
 let tempCache = {};
@@ -101,7 +101,7 @@ async function submitHeatmap() {
       start_time: '14:00',
       filter_type: 1,
     },
-    granularity: 100,
+    granularity: 50,
   };
 
   const resp = await fetchWithTimeout(
