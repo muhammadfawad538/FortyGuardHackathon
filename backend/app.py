@@ -1,16 +1,28 @@
 import logging
 import math
-from fastapi import FastAPI
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 import csv
 import os
+import requests as req_lib
 from dotenv import load_dotenv
 
 from fortyguard_client import fetch_temperature, prefetch_all
 
-logging.basicConfig(level=logging.INFO)
 load_dotenv()
+FORTYGUARD_BASE_URL = os.getenv("FORTYGUARD_BASE_URL", "https://api.fortyguard.com/v1")
+FORTYGUARD_API_KEY = os.getenv("FORTYGUARD_API_KEY", "")
+
+def _fg_headers():
+    h = {"Content-Type": "application/json"}
+    if FORTYGUARD_API_KEY:
+        h["api-key"] = FORTYGUARD_API_KEY
+    return h
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Heat Triage API")
 
@@ -81,6 +93,35 @@ def get_risk_scores():
         })
     results.sort(key=lambda x: x["risk_score"], reverse=True)
     return results
+
+
+@app.post("/api/heatmap")
+async def submit_heatmap(request: Request):
+    """Proxy heatmap submission to FortyGuard. Returns { activity_id }."""
+    body = await request.json()
+    try:
+        resp = req_lib.post(
+            f"{FORTYGUARD_BASE_URL}/heatmap",
+            headers=_fg_headers(),
+            json=body,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except req_lib.exceptions.HTTPError as exc:
+        raise HTTPException(status_code=resp.status_code, detail=str(exc))
+
+
+@app.get("/api/status/{activity_id}")
+async def poll_status(activity_id: str):
+    """Poll FortyGuard status endpoint once and return the result."""
+    status_url = f"{FORTYGUARD_BASE_URL}/status/{activity_id}"
+    try:
+        resp = req_lib.get(status_url, headers=_fg_headers(), timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except req_lib.exceptions.HTTPError as exc:
+        raise HTTPException(status_code=resp.status_code, detail=str(exc))
 
 
 @app.get("/api/correlation")

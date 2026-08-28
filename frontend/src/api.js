@@ -3,8 +3,14 @@
  * No backend needed.
  */
 
-// All requests go through the Vercel serverless proxy (no CORS, no exposed key)
-const PROXY_BASE = '/api';
+// Backend URL — localhost for dev, Vercel env var for production
+const PROXY_BASE = process.env.REACT_APP_API_URL || '';
+const _isLocal = PROXY_BASE === '' || PROXY_BASE === 'http://localhost:5000';
+
+function api(path) {
+  if (_isLocal) return `http://localhost:5000${path}`;
+  return `${PROXY_BASE}${path}`;
+}
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -136,7 +142,7 @@ async function submitHeatmap() {
     console.log(`Trying heatmap with ${payload.name}...`);
     try {
       const resp = await fetchWithTimeout(
-        `${PROXY_BASE}/heatmap`,
+        api('/heatmap'),
         {
           method: 'POST',
           headers: headers(),
@@ -166,7 +172,7 @@ async function submitHeatmap() {
 }
 
 async function pollHeatmap(activityId) {
-  const url = `${PROXY_BASE}/status/${activityId}`;
+  const url = api(`/status/${activityId}`);
 
   for (let attempt = 0; attempt < 20; attempt++) {
     try {
